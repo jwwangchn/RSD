@@ -9,6 +9,7 @@ import tensorflow as tf
 from src.utils.iou_cpu import get_iou_matrix
 from src.utils.nms_gpu import rotate_gpu_nms
 from src.utils.iou_gpu import rbbx_overlaps
+from src.utils.coordinate_convert import forward_convert, back_forward_convert
 
 def iou(box1, box2):
     """Compute the Intersection-Over-Union of two given boxes.
@@ -217,7 +218,6 @@ def bbox_transform(bbox):
 
     return out_box
 
-
 def bbox_transform_inv(bbox):
     """convert a bbox of form [xmin, ymin, xmax, ymax] to [cx, cy, w, h]. Works
     for numpy array or list of tensors.
@@ -273,12 +273,7 @@ def safe_exp(w, thresh):
     return out
 
 
-
-
-
-
-
-def get_iou_matrix_tf(boxes1, boxes2, use_gpu=True, gpu_id=0):
+def get_iou_matrix_tf(boxes1, boxes2, use_gpu=False, gpu_id=0):
     '''
 
     :param boxes_list1:[N, 5] numpy.array
@@ -395,3 +390,27 @@ def get_mask(rotate_rects, featuremap_size):
                 mask_array[y, x] = np.float32(0) if inner_rect == -1 else np.float32(1)
         all_mask.append(mask_array)
     return np.array(all_mask)
+
+
+def delete_outside_bbox(bboxes, height, width):
+    coordinates = forward_convert(coordinate=bboxes, with_label=False)
+    
+    # [x1, y1, x2, y2, x3, y3, x4, y4]
+    x1 = (coordinates[:, 0] > 0) & (coordinates[:, 0] < width)
+    y1 = (coordinates[:, 1] > 0) & (coordinates[:, 1] < height)
+    x2 = (coordinates[:, 2] > 0) & (coordinates[:, 2] < width)
+    y2 = (coordinates[:, 3] > 0) & (coordinates[:, 3] < height)
+    x3 = (coordinates[:, 4] > 0) & (coordinates[:, 4] < width)
+    y3 = (coordinates[:, 5] > 0) & (coordinates[:, 5] < height)
+    x4 = (coordinates[:, 6] > 0) & (coordinates[:, 6] < width)
+    y4 = (coordinates[:, 7] > 0) & (coordinates[:, 7] < height)
+
+    mask = x1 & y1 & x2 & y2 & x3 & y3 & x4 & y4
+    coordinates = coordinates[mask, ...]
+    bboxes = back_forward_convert(coordinates, with_label=False)
+
+    return bboxes, mask
+
+
+def bboxes_bounding_rect(bboxes, height, width):
+    

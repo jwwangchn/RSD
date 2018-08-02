@@ -129,10 +129,7 @@ class ModelSkeleton:
              self.ph_box_delta_input, self.ph_box_input, self.ph_labels]
         )
 
-        self.image_input, self.input_mask, self.box_delta_input, \
-        self.box_input, self.labels = tf.train.batch(
-            self.FIFOQueue.dequeue(), batch_size=mc.BATCH_SIZE,
-            capacity=mc.QUEUE_CAPACITY)
+        self.image_input, self.input_mask, self.box_delta_input, self.box_input, self.labels = tf.train.batch(self.FIFOQueue.dequeue(), batch_size=mc.BATCH_SIZE, capacity=mc.QUEUE_CAPACITY)
 
         # model parameters
         self.model_params = []
@@ -210,24 +207,32 @@ class ModelSkeleton:
                 self._activation_summary(box_angle, 'bbox_angle')
 
             with tf.variable_scope('trimming'):
-                xmins, ymins, xmaxs, ymaxs = util.bbox_transform([box_center_x, box_center_y, box_width, box_height])
+                # TODO: cut bounding boxes out image
+                self.det_boxes, self.mask = util.delete_outside_bbox([box_center_x, box_center_y, box_width, box_height], 
+                                                        height = mc.IMAGE_HEIGHT, 
+                                                        width = mc.IMAGE_WIDTH)
+                self.pred_class_probs = self.pred_class_probs[:, self.mask, :]
+                self.pred_conf = self.pred_conf[:, self.mask]
+                self.pred_box_delta = self.pred_box_delta[:, self.mask, :]    
 
-                # The max x position is mc.IMAGE_WIDTH - 1 since we use zero-based
-                # pixels. Same for y.
-                # crop boxes 
-                xmins = tf.minimum(tf.maximum(0.0, xmins), mc.IMAGE_WIDTH - 1.0, name='bbox_xmin')
-                self._activation_summary(xmins, 'box_xmin')
+                # xmins, ymins, xmaxs, ymaxs = util.bbox_transform([box_center_x, box_center_y, box_width, box_height])
 
-                ymins = tf.minimum(tf.maximum(0.0, ymins), mc.IMAGE_HEIGHT - 1.0, name='bbox_ymin')
-                self._activation_summary(ymins, 'box_ymin')
+                # # The max x position is mc.IMAGE_WIDTH - 1 since we use zero-based
+                # # pixels. Same for y.
+                # # crop boxes 
+                # xmins = tf.minimum(tf.maximum(0.0, xmins), mc.IMAGE_WIDTH - 1.0, name='bbox_xmin')
+                # self._activation_summary(xmins, 'box_xmin')
 
-                xmaxs = tf.maximum(tf.minimum(mc.IMAGE_WIDTH - 1.0, xmaxs), 0.0, name='bbox_xmax')
-                self._activation_summary(xmaxs, 'box_xmax')
+                # ymins = tf.minimum(tf.maximum(0.0, ymins), mc.IMAGE_HEIGHT - 1.0, name='bbox_ymin')
+                # self._activation_summary(ymins, 'box_ymin')
 
-                ymaxs = tf.maximum(tf.minimum(mc.IMAGE_HEIGHT - 1.0, ymaxs), 0.0, name='bbox_ymax')
-                self._activation_summary(ymaxs, 'box_ymax')
+                # xmaxs = tf.maximum(tf.minimum(mc.IMAGE_WIDTH - 1.0, xmaxs), 0.0, name='bbox_xmax')
+                # self._activation_summary(xmaxs, 'box_xmax')
 
-                self.det_boxes = tf.transpose(tf.stack(util.bbox_transform_inv([xmins, ymins, xmaxs, ymaxs])), (1, 2, 0), name='bbox')
+                # ymaxs = tf.maximum(tf.minimum(mc.IMAGE_HEIGHT - 1.0, ymaxs), 0.0, name='bbox_ymax')
+                # self._activation_summary(ymaxs, 'box_ymax')
+
+                # self.det_boxes = tf.transpose(tf.stack(util.bbox_transform_inv([xmins, ymins, xmaxs, ymaxs])), (1, 2, 0), name='bbox')
 
         with tf.variable_scope('IOU'):
             def _tensor_iou(box1, box2):
@@ -253,12 +258,7 @@ class ModelSkeleton:
                 return intersection / (union + mc.EPSILON) \
                        * tf.reshape(self.input_mask, [mc.BATCH_SIZE, mc.ANCHORS])
 
-            self.ious = self.ious.assign(
-                _tensor_iou(
-                    util.bbox_transform(tf.unstack(self.det_boxes, axis=2)),
-                    util.bbox_transform(tf.unstack(self.box_input, axis=2))
-                )
-            )
+            self.ious = self.ious.assign(util.get_iou_matrix_tf(self.det_boxes, self.box_input))
             self._activation_summary(self.ious, 'conf_score')
 
         with tf.variable_scope('probability') as scope:
